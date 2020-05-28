@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <assert.h>
 
+// Escape Sequence: http://www.termsys.demon.co.uk/vtansi.htm
+
 static char *
 rainbow(char *dst, size_t dst_sz, double base, double freq, double cycle,
         bool truecolor, bool invert)
@@ -154,70 +156,90 @@ print_animate(const char *line, unsigned long line_len, struct context *ctx)
     }
 }
 
-static const char *help_s = "\n"
-        "Usage: %1$s [OPTION]... [FILE]...\n"
-        "\n"
-        "Concatenate FILE(s), or standard input, to standard output.\n"
-        "With no FILE, or when FILE is -, read standard input.\n"
-        "\n"
-        "  -p, --spread=<f>      Rainbow spread (default: 3.0)\n"
-        "  -F, --freq=<f>        Rainbow frequency (default: 0.1)\n"
-        "  -S, --seed=<i>        Rainbow seed, 0 = random (default: 0)\n"
-        "  -a, --animate         Enable psychedelics\n"
-        "  -d, --duration=<i>    Animation duration (default: 12)\n"
-        "  -s, --speed=<f>       Animation speed (default: 20.0)\n"
-        "  -i, --invert          Invert fg and bg\n"
-        "  -t, --truecolor       24-bit (truecolor)\n"
-        "  -f, --force           Force color even when stdout is not a tty\n"
-        "  -v, --version         Print version and exit\n"
-        "  -h, --help            Show this message\n"
-        "\n"
-        "Examples:\n"
-        "  %1$s f - g      Output f's contents, then stdin, then g's contents.\n"
-        "  %1$s            Copy standard input to standard output.\n"
-        "  fortune | %1$s  Display a rainbow cookie.\n"
-        "\n"
-        "Report lolcat bugs to <https://github.com/wmil/lolcat/issues>\n"
-        "lolcat home page: <https://github.com/wmil/lolcat/>\n"
-        "Ruby (original) implementation: <https://github.com/busyloop/lolcat/>\n"
-        "Another C implementation: <https://github.com/jaseg/lolcat/>\n"
-        "Report lolcat translation bugs to <http://speaklolcat.com/>\n";
-
 static void
-__attribute__ ((unused))
-help(const char *exec_name)
+help(const char *exec_name, struct context *ctx)
 {
-    printf(help_s, exec_name);
+    static const char *help_s = "\n"
+            "Usage: %1$s [OPTION]... [FILE]...\n"
+            "\n"
+            "Concatenate FILE(s), or standard input, to standard output.\n"
+            "With no FILE, or when FILE is -, read standard input.\n"
+            "\n"
+            "  -p, --spread=<f>      Rainbow spread (default: 3.0)\n"
+            "  -F, --freq=<f>        Rainbow frequency (default: 0.1)\n"
+            "  -V, --vertical=<f>    Rainbow vertical frequency (default: 1.0)\n"
+            "  -S, --seed=<i>        Rainbow seed, 0 = random (default: 0)\n"
+            "  -a, --animate         Enable psychedelics\n"
+            "  -d, --duration=<i>    Animation duration (default: 12)\n"
+            "  -s, --speed=<f>       Animation speed (default: 20.0)\n"
+            "  -i, --invert          Invert fg and bg\n"
+            "  -t, --truecolor       24-bit (truecolor)\n"
+            "  -f, --force           Force color even when stdout is not a tty\n"
+            "  -v, --version         Print version and exit\n"
+            "  -h, --help            Show this message\n"
+            "\n"
+            "Examples:\n"
+            "  %1$s f - g      Output f's contents, then stdin, then g's contents.\n"
+            "  %1$s            Copy standard input to standard output.\n"
+            "  fortune | %1$s  Display a rainbow cookie.\n"
+            "\n"
+            "Report lolcat bugs to <https://github.com/wmil/lolcat/issues>\n"
+            "lolcat home page: <https://github.com/wmil/lolcat/>\n"
+            "Ruby (original) implementation: <https://github.com/busyloop/lolcat/>\n"
+            "Another C implementation: <https://github.com/jaseg/lolcat/>\n"
+            "Report lolcat translation bugs to <http://speaklolcat.com/>\n";
+
+    char msg[2048];
+    int wlen = snprintf(msg, sizeof(msg), help_s, exec_name);
+    assert((size_t) wlen < sizeof(msg));
+
+    print_plain(msg, strlen(msg), ctx);
 }
 
+struct context default_ctx = {
+    .config = {
+        .animate = false,
+        .invert = false,
+        .truecolor = true,
+        .spread = 3.0,
+        .freq = 0.1,
+        .vertical_freq = 1.0,
+        .animate_duration = 12,
+        .animate_speed = 20.0,
+    },
+    .runtime = {
+        .spread_inverse = 1.0 / 3.0,
+        .line_count = 0,
+        .char_count = 0,
+        .line_base = 0.0,
+        .n_column = 80,
+        .animate_interval = {
+            .tv_sec = 0,
+            .tv_nsec = 50000000,
+        },
+    },
+};
+
 int
-main(int argc __attribute__ ((unused)), char **argv __attribute__ ((unused)))
+main(int argc __attribute__ ((unused)), char **argv)
 {
     char my_buffer[2048], my_buffer2[2048];
-    const char *sample = "The quick brown fox jumps over the lazy dog";
+    // const char *sample = "The quick brown fox jumps over the lazy dog";
+    const char *sample = "那只敏捷的棕色狐狸🦊跳过了一只懒惰的狗🐶";
     unsigned seed;
     struct timespec ts;
 
     snprintf(my_buffer, sizeof(my_buffer), "%s\n%s\n%s\n%s\nThe quick brown ", sample, sample, sample, sample);
     snprintf(my_buffer2, sizeof(my_buffer2), "fox jumps over the lazy dog\n%s\n%s\n%s\n%s\n", sample, sample, sample, sample);
 
-    // help(argv[0]);
-
     clock_gettime(CLOCK_MONOTONIC, &ts);
     seed = (unsigned) ts.tv_nsec ^ (unsigned) ts.tv_sec;
 
-    struct context ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    struct context ctx = default_ctx;
+
     ctx.config.animate = true;
-    ctx.config.truecolor = true;
-    ctx.config.spread = 3.0;
-    ctx.config.freq = 0.1;
-    ctx.config.vertical_freq = 1.0;
-    ctx.config.animate_duration = 12;
-    ctx.config.animate_speed = 20.0;
     ctx.runtime.spread_inverse = 1.0 / ctx.config.spread;
     ctx.runtime.line_base = M_PI * rand_r(&seed) / RAND_MAX;
-    ctx.runtime.n_column = 80;
 
     double interval_s, interval_fractional, interval_integral;
     interval_s = 1.0 / ctx.config.animate_speed;
@@ -226,14 +248,19 @@ main(int argc __attribute__ ((unused)), char **argv __attribute__ ((unused)))
     ctx.runtime.animate_interval.tv_nsec = interval_fractional * 1000000000L;
 
     if (ctx.config.animate) {
-        printf("\033[?25l");
+        static const char *hide_cursor = "\033[?25l";
+        static const char *show_cursor = "\033[?25h";
+
+        printf("%s", hide_cursor);
         print_animate(my_buffer, strlen(my_buffer), &ctx);
         print_animate(my_buffer2, strlen(my_buffer2), &ctx);
-        printf("\033[?25h");
+        printf("%s", show_cursor);
     } else {
         print_plain(my_buffer, strlen(my_buffer), &ctx);
         print_plain(my_buffer2, strlen(my_buffer2), &ctx);
     }
+
+    help(argv[0], &ctx);
 
     return 0;
 }
