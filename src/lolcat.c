@@ -1,4 +1,64 @@
 #include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
+
+static char *
+rainbow_esc(char *dst, size_t dst_sz, double freq, int iter, bool truecolor, bool invert)
+{
+    static const char *fg_256color = "\x1b[38;5;%um";
+    static const char *bg_256color = "\x1b[48;5;%um";
+    static const char *fg_truecolor = "\x1b[38;2;%u;%u;%um";
+    static const char *bg_truecolor = "\x1b[48;2;%u;%u;%um";
+
+    uint8_t c, s, r, g, b;
+    const char *fmt;
+    int wlen;
+
+    c = truecolor ? 128 : 3;
+    s = c - 1;
+    r = sin(freq * iter) * s + c;
+    g = sin(freq * iter + 2 * M_PI / 3) * s + c;
+    b = sin(freq * iter + 4 * M_PI / 3) * s + c;
+
+    if (truecolor) {
+        fmt = invert ? bg_truecolor : fg_truecolor;
+        wlen = snprintf(dst, dst_sz, fmt, r, g, b);
+    } else {
+        uint8_t cube = 16 + r * 36 + g * 6 + b;
+        fmt = invert ? bg_256color : fg_256color;
+        wlen = snprintf(dst, dst_sz, fmt, cube);
+    }
+
+    return ((size_t ) wlen >= dst_sz) ? NULL : dst;
+}
+
+static void
+println(const char *line, double freq, int init_iter, bool truecolor, bool invert)
+{
+    static const char *fg_default = "\x1b[39m";
+    static const char *bg_default = "\x1b[49m";
+
+    const char *default_esc;
+    char esc_buf[32];
+
+    default_esc = invert ? bg_default : fg_default;
+
+    printf("%s%s%s\n", rainbow_esc(esc_buf, sizeof(esc_buf), freq, init_iter, truecolor, invert), line, default_esc);
+}
+
+struct lolcat_ctx {
+    bool animate;
+    bool invert;
+    bool truecolor;
+    unsigned int seed;
+    double spread;
+    double freq;
+    double animate_duration;
+    double animate_speed;
+};
 
 static const char *help_s = "\n"
         "Usage: %1$s [OPTION]... [FILE]...\n"
@@ -38,5 +98,10 @@ help(const char *exec_name)
 int
 main(int argc __attribute__((unused)), char **argv)
 {
+    unsigned seed;
+
     help(argv[0]);
+
+    seed = (int) time(NULL);
+    println("test", 0.1, rand_r(&seed), true, false); 
 }
