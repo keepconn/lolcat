@@ -12,10 +12,10 @@ static char *
 rainbow(char *dst, size_t dst_sz, double base, double freq, double cycle,
         bool truecolor, bool invert)
 {
-    static const char *fg_256color = "\x1b[38;5;%um";
-    static const char *bg_256color = "\x1b[48;5;%um";
-    static const char *fg_truecolor = "\x1b[38;2;%u;%u;%um";
-    static const char *bg_truecolor = "\x1b[48;2;%u;%u;%um";
+    static const char *fg_256color = "\033[38;5;%um";
+    static const char *bg_256color = "\033[48;5;%um";
+    static const char *fg_truecolor = "\033[38;2;%u;%u;%um";
+    static const char *bg_truecolor = "\033[48;2;%u;%u;%um";
 
     uint8_t c, s, r, g, b;
     const char *fmt;
@@ -56,11 +56,12 @@ struct context {
         unsigned long char_count;
         double line_base;
         unsigned long n_column;
+        struct timespec animate_interval;
     } runtime;
 };
 
-static const char *fg_default = "\x1b[39m";
-static const char *bg_default = "\x1b[49m";
+static const char *fg_default = "\033[39m";
+static const char *bg_default = "\033[49m";
 
 static void
 print_plain(const char *data, unsigned long data_len, struct context *ctx)
@@ -102,14 +103,10 @@ print_plain(const char *data, unsigned long data_len, struct context *ctx)
 static void
 print_animate(const char *line, unsigned long line_len, struct context *ctx)
 {
-    const char *default_esc = ctx->config.invert ? bg_default : fg_default;
-    struct timespec interval_ts;
-    double interval_s, interval_fractional, interval_integral;
+    static const char *save_cursor = "\0337";
+    static const char *restore_cursor = "\0338";
 
-    interval_s = 1.0 / ctx->config.animate_speed;
-    interval_fractional = modf(interval_s, &interval_integral);
-    interval_ts.tv_sec = interval_integral;
-    interval_ts.tv_nsec = interval_fractional * 1000000000L;
+    const char *default_esc = ctx->config.invert ? bg_default : fg_default;
 
     while (line_len > 0) {
         unsigned long limit = MIN(line_len, ctx->runtime.n_column);
@@ -121,22 +118,21 @@ print_animate(const char *line, unsigned long line_len, struct context *ctx)
         ctx->runtime.line_base +=
             ctx->config.vertical_freq * ctx->runtime.spread_inverse;
 
-        printf("\e7");
+        printf("%s", save_cursor);
 
         for (unsigned long i = 0; i < ctx->config.animate_duration; i++) {
-            double virtual_line_base =
-                ctx->runtime.line_base + ctx->config.spread * i;
+            double duration_base = ctx->config.spread * i;
 
-            printf("\e8");
+            printf("%s", restore_cursor);
 
             for (unsigned long j = 0; j < end; j++) {
                 char escape[32];
                 const char *rainbow_escape;
 
                 rainbow_escape = rainbow(escape, sizeof(escape),
-                        virtual_line_base,
+                        ctx->runtime.line_base,
                         ctx->config.freq,
-                        ctx->runtime.spread_inverse * j,
+                        ctx->runtime.spread_inverse * j + duration_base,
                         ctx->config.truecolor,
                         ctx->config.invert);
                 assert(rainbow_escape != NULL);
@@ -144,7 +140,7 @@ print_animate(const char *line, unsigned long line_len, struct context *ctx)
                 printf("%s%c", rainbow_escape, line[j]);
             }
 
-            nanosleep(&interval_ts, NULL);
+            nanosleep(&ctx->runtime.animate_interval, NULL);
         }
 
         printf("%s\n", default_esc);
@@ -223,13 +219,21 @@ main(int argc __attribute__ ((unused)), char **argv __attribute__ ((unused)))
     ctx.runtime.line_base = M_PI * rand_r(&seed) / RAND_MAX;
     ctx.runtime.n_column = 80;
 
+    double interval_s, interval_fractional, interval_integral;
+    interval_s = 1.0 / ctx.config.animate_speed;
+    interval_fractional = modf(interval_s, &interval_integral);
+    ctx.runtime.animate_interval.tv_sec = interval_integral;
+    ctx.runtime.animate_interval.tv_nsec = interval_fractional * 1000000000L;
+
     if (ctx.config.animate) {
-        printf("\x1b[?25l");
+        printf("\033[?25l");
         print_animate(my_buffer, strlen(my_buffer), &ctx);
         print_animate(my_buffer2, strlen(my_buffer2), &ctx);
-        printf("\x1b[?25h");
+        printf("\033[?25h");
     } else {
         print_plain(my_buffer, strlen(my_buffer), &ctx);
         print_plain(my_buffer2, strlen(my_buffer2), &ctx);
     }
+
+    return 0;
 }
