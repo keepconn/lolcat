@@ -4,9 +4,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
+#include <string.h>
+#include <unistd.h>
+#include <assert.h>
 
 static char *
-rainbow_esc(char *dst, size_t dst_sz, double freq, int iter, bool truecolor, bool invert)
+rainbow(char *dst, size_t dst_sz, double base, double freq, double cycle,
+        bool truecolor, bool invert)
 {
     static const char *fg_256color = "\x1b[38;5;%um";
     static const char *bg_256color = "\x1b[48;5;%um";
@@ -19,9 +23,9 @@ rainbow_esc(char *dst, size_t dst_sz, double freq, int iter, bool truecolor, boo
 
     c = truecolor ? 128 : 3;
     s = c - 1;
-    r = sin(freq * iter) * s + c;
-    g = sin(freq * iter + 2 * M_PI / 3) * s + c;
-    b = sin(freq * iter + 4 * M_PI / 3) * s + c;
+    r = sin(base + freq * cycle) * s + c;
+    g = sin(base + freq * cycle + 2 * M_PI / 3) * s + c;
+    b = sin(base + freq * cycle + 4 * M_PI / 3) * s + c;
 
     if (truecolor) {
         fmt = invert ? bg_truecolor : fg_truecolor;
@@ -35,30 +39,124 @@ rainbow_esc(char *dst, size_t dst_sz, double freq, int iter, bool truecolor, boo
     return ((size_t ) wlen >= dst_sz) ? NULL : dst;
 }
 
+struct context {
+    struct {
+        bool animate;
+        bool invert;
+        bool truecolor;
+        double spread;
+        double freq;
+        double vertical_freq;
+        unsigned long animate_duration;
+        double animate_speed;
+    } config;
+    struct {
+        double spread_inverse;
+        unsigned long line_count;
+        unsigned long char_count;
+        double line_base;
+        unsigned long n_column;
+    } runtime;
+};
+
+static const char *fg_default = "\x1b[39m";
+static const char *bg_default = "\x1b[49m";
+
 static void
-println(const char *line, double freq, int init_iter, bool truecolor, bool invert)
+print_plain(const char *data, unsigned long data_len, struct context *ctx)
 {
-    static const char *fg_default = "\x1b[39m";
-    static const char *bg_default = "\x1b[49m";
+    const char *default_esc = ctx->config.invert ? bg_default : fg_default;
 
-    const char *default_esc;
-    char esc_buf[32];
+    for (unsigned long i = 0; i < data_len; i++) {
+        char escape[32];
+        const char *rainbow_escape;
 
-    default_esc = invert ? bg_default : fg_default;
+        if (ctx->runtime.char_count == 0) {
+            ctx->runtime.line_count++;
+            ctx->runtime.line_base +=
+                ctx->config.vertical_freq * ctx->runtime.spread_inverse;
+        }
 
-    printf("%s%s%s\n", rainbow_esc(esc_buf, sizeof(esc_buf), freq, init_iter, truecolor, invert), line, default_esc);
+        if (data[i] == '\n') {
+            printf("%s\n", default_esc);
+            ctx->runtime.char_count = 0;
+            continue;
+        }
+
+        rainbow_escape = rainbow(escape, sizeof(escape),
+                ctx->runtime.line_base,
+                ctx->config.freq,
+                ctx->runtime.char_count * ctx->runtime.spread_inverse,
+                ctx->config.truecolor,
+                ctx->config.invert);
+        assert(rainbow_escape != NULL);
+
+        printf("%s%c", rainbow_escape, data[i]);
+
+        ctx->runtime.char_count++;
+    }
 }
 
-struct lolcat_ctx {
-    bool animate;
-    bool invert;
-    bool truecolor;
-    unsigned int seed;
-    double spread;
-    double freq;
-    double animate_duration;
-    double animate_speed;
-};
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
+static void
+print_animate(const char *line, unsigned long line_len, struct context *ctx)
+{
+    const char *default_esc = ctx->config.invert ? bg_default : fg_default;
+    struct timespec interval_ts;
+    double interval_s, interval_fractional, interval_integral;
+
+    interval_s = 1.0 / ctx->config.animate_speed;
+    interval_fractional = modf(interval_s, &interval_integral);
+    interval_ts.tv_sec = interval_integral;
+    interval_ts.tv_nsec = interval_fractional * 1000000000L;
+
+    while (line_len > 0) {
+        unsigned long limit = MIN(line_len, ctx->runtime.n_column);
+        unsigned long end;
+
+        for (end = 0; end < limit && line[end] != '\n'; end++);
+
+        ctx->runtime.line_count++;
+        ctx->runtime.line_base +=
+            ctx->config.vertical_freq * ctx->runtime.spread_inverse;
+
+        printf("\e7");
+
+        for (unsigned long i = 0; i < ctx->config.animate_duration; i++) {
+            double virtual_line_base =
+                ctx->runtime.line_base + ctx->config.spread * i;
+
+            printf("\e8");
+
+            for (unsigned long j = 0; j < end; j++) {
+                char escape[32];
+                const char *rainbow_escape;
+
+                rainbow_escape = rainbow(escape, sizeof(escape),
+                        virtual_line_base,
+                        ctx->config.freq,
+                        ctx->runtime.spread_inverse * j,
+                        ctx->config.truecolor,
+                        ctx->config.invert);
+                assert(rainbow_escape != NULL);
+
+                printf("%s%c", rainbow_escape, line[j]);
+            }
+
+            nanosleep(&interval_ts, NULL);
+        }
+
+        printf("%s\n", default_esc);
+
+        if (end < limit) {
+            assert(line[end] == '\n');
+            end++;
+        }
+        line = &line[end];
+        line_len -= end;
+    }
+}
 
 static const char *help_s = "\n"
         "Usage: %1$s [OPTION]... [FILE]...\n"
@@ -90,18 +188,48 @@ static const char *help_s = "\n"
         "Report lolcat translation bugs to <http://speaklolcat.com/>\n";
 
 static void
+__attribute__ ((unused))
 help(const char *exec_name)
 {
     printf(help_s, exec_name);
 }
 
 int
-main(int argc __attribute__((unused)), char **argv)
+main(int argc __attribute__ ((unused)), char **argv __attribute__ ((unused)))
 {
+    char my_buffer[2048], my_buffer2[2048];
+    const char *sample = "The quick brown fox jumps over the lazy dog";
     unsigned seed;
+    struct timespec ts;
 
-    help(argv[0]);
+    snprintf(my_buffer, sizeof(my_buffer), "%s\n%s\n%s\n%s\nThe quick brown ", sample, sample, sample, sample);
+    snprintf(my_buffer2, sizeof(my_buffer2), "fox jumps over the lazy dog\n%s\n%s\n%s\n%s\n", sample, sample, sample, sample);
 
-    seed = (int) time(NULL);
-    println("test", 0.1, rand_r(&seed), true, false); 
+    // help(argv[0]);
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    seed = (unsigned) ts.tv_nsec ^ (unsigned) ts.tv_sec;
+
+    struct context ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.config.animate = true;
+    ctx.config.truecolor = true;
+    ctx.config.spread = 3.0;
+    ctx.config.freq = 0.1;
+    ctx.config.vertical_freq = 1.0;
+    ctx.config.animate_duration = 12;
+    ctx.config.animate_speed = 20.0;
+    ctx.runtime.spread_inverse = 1.0 / ctx.config.spread;
+    ctx.runtime.line_base = M_PI * rand_r(&seed) / RAND_MAX;
+    ctx.runtime.n_column = 80;
+
+    if (ctx.config.animate) {
+        printf("\x1b[?25l");
+        print_animate(my_buffer, strlen(my_buffer), &ctx);
+        print_animate(my_buffer2, strlen(my_buffer2), &ctx);
+        printf("\x1b[?25h");
+    } else {
+        print_plain(my_buffer, strlen(my_buffer), &ctx);
+        print_plain(my_buffer2, strlen(my_buffer2), &ctx);
+    }
 }
