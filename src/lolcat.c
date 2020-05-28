@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
+#include <errno.h>
 
 // Escape Sequence: http://www.termsys.demon.co.uk/vtansi.htm
 
@@ -196,6 +197,80 @@ help(const char *exec_name, struct context *ctx)
     print_plain(msg, strlen(msg), ctx);
 }
 
+static int
+cat(char **files, struct context *ctx)
+{
+    static const char *hide_cursor = "\033[?25l";
+    static const char *show_cursor = "\033[?25h";
+
+    int eno = EXIT_FAILURE;
+    FILE *src = NULL;
+    size_t l_sz = 0;
+    char *line = NULL;
+
+    if (ctx->config.animate) {
+        printf("%s", hide_cursor);
+    }
+
+    while (*files) {
+        const char *file = *(files++);
+        ssize_t l_len;
+
+        if (strcmp(file, "-") == 0) {
+            src = stdin;
+        } else {
+            src = fopen(file, "r");
+            if (src == NULL) {
+                fprintf(stderr,
+                        "fopen(%s) failed: %s\n",
+                        file, strerror(errno));
+                goto error;
+            }
+        }
+
+        do {
+            l_len = getline(&line, &l_sz, src);
+            if (l_len < 0) {
+                if (errno != 0) {
+                    fprintf(stderr,
+                            "getline(%s) failed: %s\n",
+                            file, strerror(errno));
+                    goto error;
+                }
+                break;
+            }
+
+            if (ctx->config.animate) {
+                print_animate(line, l_len, ctx);
+            } else {
+                print_plain(line, l_len, ctx);
+            }
+        } while (true);
+
+        if (src != stdin) {
+            fclose(src);
+            src = NULL;
+        }
+    }
+
+    eno = EXIT_SUCCESS;
+
+error:
+    if (src && src != stdin) {
+        fclose(src);
+        src = NULL;
+    }
+    if (line) {
+        free(line);
+        line = NULL;
+    }
+    if (ctx->config.animate) {
+        printf("%s", show_cursor);
+    }
+
+    return eno;
+}
+
 struct context default_ctx = {
     .config = {
         .animate = false,
@@ -223,6 +298,14 @@ struct context default_ctx = {
 int
 main(int argc __attribute__ ((unused)), char **argv)
 {
+    // TODO:
+    // 1. Cat [Done]
+    // 2. Terminal detection & SIGWINCH
+    // 3. Options
+    // 4. Clean up on signal
+    // 5. Input escape filter
+    // 6. Precision
+
     char my_buffer[2048], my_buffer2[2048];
     // const char *sample = "The quick brown fox jumps over the lazy dog";
     const char *sample = "那只敏捷的棕色狐狸🦊跳过了一只懒惰的狗🐶";
@@ -233,7 +316,7 @@ main(int argc __attribute__ ((unused)), char **argv)
     snprintf(my_buffer2, sizeof(my_buffer2), "fox jumps over the lazy dog\n%s\n%s\n%s\n%s\n", sample, sample, sample, sample);
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    seed = (unsigned) ts.tv_nsec ^ (unsigned) ts.tv_sec;
+    seed = (unsigned) ts.tv_sec ^ (unsigned) (ts.tv_nsec >> 20);
 
     struct context ctx = default_ctx;
 
@@ -247,20 +330,9 @@ main(int argc __attribute__ ((unused)), char **argv)
     ctx.runtime.animate_interval.tv_sec = interval_integral;
     ctx.runtime.animate_interval.tv_nsec = interval_fractional * 1000000000L;
 
-    if (ctx.config.animate) {
-        static const char *hide_cursor = "\033[?25l";
-        static const char *show_cursor = "\033[?25h";
+    cat(&argv[1], &ctx);
 
-        printf("%s", hide_cursor);
-        print_animate(my_buffer, strlen(my_buffer), &ctx);
-        print_animate(my_buffer2, strlen(my_buffer2), &ctx);
-        printf("%s", show_cursor);
-    } else {
-        print_plain(my_buffer, strlen(my_buffer), &ctx);
-        print_plain(my_buffer2, strlen(my_buffer2), &ctx);
-    }
-
-    help(argv[0], &ctx);
+    // help(argv[0], &ctx);
 
     return 0;
 }
