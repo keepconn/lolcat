@@ -1,5 +1,5 @@
 CC=clang
-CFLAGS=-O2 -g -Wall -Wextra -lm
+CFLAGS=-O3 -Wall -Wextra -lm
 
 .PHONY:
 all: bin/lolcat
