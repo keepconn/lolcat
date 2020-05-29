@@ -290,7 +290,7 @@ help(const char *exec_name, struct context *ctx)
             "  %1$s            Copy standard input to standard output.\n"
             "  fortune | %1$s  Display a rainbow cookie.\n"
             "\n"
-            "lolcat home page:  <https://github.com/wmil/lolcat/>\n"
+            "lolcat home page:  <https://github.com/keepconn/lolcat/>\n"
             "Ruby (original):   <https://github.com/busyloop/lolcat/>\n"
             "Python:            <https://github.com/tehmaze/lolcat/>\n"
             "Another C:         <https://github.com/jaseg/lolcat/>\n"
